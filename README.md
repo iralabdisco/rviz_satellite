@@ -23,7 +23,8 @@ This is the default URI, which will load data from MapQuest. The tiles are free,
 Map tiles will be cached to the `mapscache` directory in the `rviz_satellite` package directory. At present the cache does not expire automatically - you should delete the files in the folder if you want the images to be reloaded.
 
 
-============================
+---
+
 This version allows to use also the tiles provided by Bing Maps. Up to now I'm using this URI, but expect changes.
 
 ``http://ecn.t1.tiles.virtualearth.net/tiles/a{quad}.jpeg?g=3653``
@@ -31,7 +32,8 @@ This version allows to use also the tiles provided by Bing Maps. Up to now I'm u
 The code was modified using the information provided here: ``https://msdn.microsoft.com/en-us/library/bb259689.aspx``
 
 Using OSM or BING is still hard-coded, so you need to modify the ``provider`` variable in tileloader.h.
-============================
+
+---
 
 
 ### Options
