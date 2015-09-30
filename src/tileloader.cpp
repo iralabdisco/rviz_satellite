@@ -114,7 +114,8 @@ void TileLoader::start() {
             ROS_ASSERT(startPoint >=0);
             quadkey = tileToQuad(xbin.to_string(), ybin.to_string(), startPoint);
 
-            //TODO: set filename
+            fileName = "x_" + QString::number(x)+ "y_" +QString::number(y) +"z_" +QString::number(zoom_)+ ".jpg";
+            fullPath = QDir::cleanPath(cachePath_ + QDir::separator() + fileName);
         }
         else
         {
@@ -127,6 +128,7 @@ void TileLoader::start() {
         QFile tile(fullPath);
         if (tile.exists())
         {
+            ROS_INFO_STREAM("Using cache tile for " << fullPath.toStdString());
             QImage image(fullPath);
             tiles_.push_back(MapTile(x, y, zoom_, image));
         }
