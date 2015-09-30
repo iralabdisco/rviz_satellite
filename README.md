@@ -1,5 +1,7 @@
 ## rviz_satellite
 
+** THIS IS AN EXPERIMENTAL VERSION FOR USING THE BING MAPS SYSTEM **
+
 Plugin for rviz for displaying satellite maps loaded from the internet.
 
 ![Alt text](.screenshot.png?raw=true "Example Image")
@@ -20,6 +22,18 @@ This is the default URI, which will load data from MapQuest. The tiles are free,
 
 Map tiles will be cached to the `mapscache` directory in the `rviz_satellite` package directory. At present the cache does not expire automatically - you should delete the files in the folder if you want the images to be reloaded.
 
+
+============================
+This version allows to use also the tiles provided by Bing Maps. Up to now I'm using this URI, but expect changes.
+
+``http://ecn.t1.tiles.virtualearth.net/tiles/a{quad}.jpeg?g=3653``
+
+The code was modified using the information provided here: ``https://msdn.microsoft.com/en-us/library/bb259689.aspx``
+
+Using OSM or BING is still hard-coded, so you need to modify the ``provider`` variable in tileloader.h.
+============================
+
+
 ### Options
 
 - `Alpha` is simply the display transparency.
@@ -29,4 +43,8 @@ Map tiles will be cached to the `mapscache` directory in the `rviz_satellite` pa
 
 ### Questions, Bugs
 
-Contact the author (gareth-cross on github), or open an issue.
+Contact the author, or open an issue.
+
+### Credits 
+based on the extraordinary work by gareth-cross on github
+mods by trigal on github
