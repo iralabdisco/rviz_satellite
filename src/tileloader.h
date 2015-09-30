@@ -18,6 +18,10 @@
 #include <QNetworkReply>
 #include <vector>
 #include <tuple>
+#include <bitset>
+#include <string>   //TODO: CHECK IF NEEDED!
+
+using namespace std;
 
 class TileLoader : public QObject {
   Q_OBJECT
@@ -68,7 +72,7 @@ public:
   void start();
 
   /// Meters/pixel of the tiles.
-  double resolution() const;
+  double resolution();
 
   /// X index of central tile.
   int tileX() const { return tile_x_; }
@@ -83,11 +87,14 @@ public:
   double originY() const { return origin_y_; }
 
   /// Convert lat/lon to a tile index with mercator projection.
-  static void latLonToTileCoords(double lat, double lon, unsigned int zoom,
+  void latLonToTileCoords_OSM(double lat, double lon, unsigned int zoom,
                                  double &x, double &y);
 
+  void latLonToTileCoords_BING(double lat, double lon, unsigned int zoom,
+                                 double &x, double &tileY);
+
   /// Convert latitude and zoom level to ground resolution.
-  static double zoomToResolution(double lat, unsigned int zoom);
+  double zoomToResolution(double lat, unsigned int zoom) ;
 
   /// Path to tiles on the server.
   const std::string &objectURI() const { return object_uri_; }
@@ -97,6 +104,12 @@ public:
 
   /// Cancel all current requests.
   void abort();
+
+  double getOffsetx();
+  void setOffsetx(double value);
+
+  double getOffsety();
+  void setOffsety(double value);
 
 signals:
 
@@ -116,8 +129,25 @@ private slots:
 
 private:
 
+  // Provisional method to switch between OSM[0] and BING[1] tiles
+  char provider = 1;
+
+  // Used to handle Bing Tiles
+  const double EarthRadius  = 6378137;
+  const double MinLatitude  = -85.05112878;
+  const double MaxLatitude  = 85.05112878;
+  const double MinLongitude = -180;
+  const double MaxLongitude = 180;
+  double Clip(double n, double minValue, double maxValue);
+  unsigned int MapSize(int levelOfDetail);
+  string tileToQuad(string x, string y, int startPoint);
+  string reverseString(string s);
+  double offsetx = 0.0f;
+  double offsety = 0.0f;
+
   /// URI for tile [x,y]
-  QUrl uriForTile(int x, int y) const;
+  QUrl uriForTile_OSM(int x, int y) const;
+  QUrl uriForTile_BING(std::string quadkey) const;
 
   /// Maximum number of tiles for the zoom level
   int maxTiles() const;

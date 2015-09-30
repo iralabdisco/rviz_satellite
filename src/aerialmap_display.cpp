@@ -526,12 +526,15 @@ void AerialMapDisplay::transformAerialMap() {
   pose.orientation.x = 0;
   pose.orientation.y = 0;
   pose.orientation.z = 0;
-  pose.position.x = 0;
-  pose.position.y = 0;
+  pose.position.x = loader_->getOffsetx();
+  pose.position.y = loader_->getOffsety();
   pose.position.z = 0;
+
+  //pose.position.x = -26.0495239345199;
+  //pose.position.y = 8.813748699649580;
   
   if (frame_.empty()) {
-    frame_ = "world";
+    frame_ = "local_map";
   }
   
   if (!context_->getFrameManager()->transform(frame_, ros::Time(), pose,

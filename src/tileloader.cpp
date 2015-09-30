@@ -22,8 +22,9 @@
 #include <ros/ros.h>
 #include <ros/package.h>
 
+#define STI(a) ((a) == '1' ? (1) : (0))
 
-static size_t replaceRegex(const boost::regex &ex, std::string &str,
+size_t replaceRegex(const boost::regex &ex, std::string &str,
                            const std::string &replace) {
   std::string::const_iterator start = str.begin(), end = str.end();
   boost::match_results<std::string::const_iterator> what;
@@ -65,12 +66,15 @@ TileLoader::TileLoader(const std::string &service, double latitude,
 
   //  calculate center tile coordinates
   double x, y;
-  latLonToTileCoords(latitude_, longitude_, zoom_, x, y);
+  latLonToTileCoords_OSM (latitude_, longitude_, zoom_, x, y);
+  latLonToTileCoords_BING(latitude_, longitude_, zoom_, x, y);
   tile_x_ = std::floor(x);
   tile_y_ = std::floor(y);
   //  fractional component
-  origin_x_ = x - tile_x_;
-  origin_y_ = y - tile_y_;
+  origin_x_ = x - (double)tile_x_;
+  origin_y_ = y - (double)tile_y_;
+
+  ROS_ERROR_STREAM ("ORIGIN: " << origin_x_ << "\t" << origin_y_);
 }
 
 void TileLoader::start() {
@@ -91,22 +95,56 @@ void TileLoader::start() {
   for (int y = min_y; y <= max_y; y++) {
     for (int x = min_x; x <= max_x; x++) {
         
-        // Generate filename
-        QString fileName = "x_" + QString::number(x)+ "y_" +QString::number(y) +"z_" +QString::number(zoom_)+ ".jpg";
-        QString fullPath = QDir::cleanPath(cachePath_ + QDir::separator() + fileName);
+        std::bitset<32> xbin(x);
+        std::bitset<32> ybin(y);
+        QString fileName;
+        QString fullPath;
+        string quadkey;
 
-        // Check if tile is already in the cache
+        if (provider == 0) //OSM
+        {
+            // Generate filename
+            fileName = "x_" + QString::number(x)+ "y_" +QString::number(y) +"z_" +QString::number(zoom_)+ ".jpg";
+            fullPath = QDir::cleanPath(cachePath_ + QDir::separator() + fileName);
+        }
+        else if (provider == 1) //BING
+        {
+            unsigned int startPoint = 32 - (floor(log(std::max(x,y))/log(2)) + 1) ;
+            ROS_DEBUG_STREAM("Start Point: " << startPoint);
+            ROS_ASSERT(startPoint >=0);
+            quadkey = tileToQuad(xbin.to_string(), ybin.to_string(), startPoint);
+
+            //TODO: set filename
+        }
+        else
+        {
+            // TODO: handle this situation
+            abort();
+            return;
+        }
+
+        // Check if tile is already in the cache [common]
         QFile tile(fullPath);
-        if (tile.exists()) {
+        if (tile.exists())
+        {
             QImage image(fullPath);
             tiles_.push_back(MapTile(x, y, zoom_, image));
-        } else {
-            const QUrl uri = uriForTile(x, y);
+        }
+        else
+        {
+            QUrl uri ;
+            if (provider==0) //OSM
+                uri = uriForTile_OSM(x, y);
+            if (provider==1) //BING
+                uri = uriForTile_BING(quadkey);
+
             //  send request
             const QNetworkRequest request = QNetworkRequest(uri);
             QNetworkReply *rep = qnam_->get(request);
             emit initiatedRequest(request);
             tiles_.push_back(MapTile(x, y, zoom_, rep));
+
+            ROS_DEBUG_STREAM("Downloading tile:\t" << QString(uri.toString()).toUtf8().constData());
         }
     }
   }
@@ -124,13 +162,14 @@ void TileLoader::start() {
     }
 }
 
-double TileLoader::resolution() const {
+double TileLoader::resolution()
+{
   return zoomToResolution(latitude_, zoom_);
 }
 
 /// @see http://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
 /// For explanation of these calculations.
-void TileLoader::latLonToTileCoords(double lat, double lon, unsigned int zoom,
+void TileLoader::latLonToTileCoords_OSM(double lat, double lon, unsigned int zoom,
                                     double &x, double &y) {
   if (zoom > 19) {
     throw std::invalid_argument("Zoom level " + std::to_string(zoom) +
@@ -146,14 +185,70 @@ void TileLoader::latLonToTileCoords(double lat, double lon, unsigned int zoom,
   const double lat_rad = lat * rho;
 
   unsigned int n = (1 << zoom);
-  x = n * ((lon + 180) / 360.0);
-  y = n * (1 - (std::log(std::tan(lat_rad) + 1 / std::cos(lat_rad)) / M_PI)) /
-      2;
+  x = n * ((lon + 180.0f) / 360.0f);
+  y = n * (1.0f - (std::log(std::tan(lat_rad) + 1 / std::cos(lat_rad)) / M_PI)) /
+      2.0f;
   std::cout << "Center tile coords: " << x << ", " << y << std::endl;
 }
 
+/// @see https://msdn.microsoft.com/en-us/library/bb259689.aspx
+/// For explanation of these calculations.
+void TileLoader::latLonToTileCoords_BING(double lat, double lon, unsigned int zoom,
+                                    double &tileX, double &tileY) {
+    if (zoom > 19)
+    {
+        throw std::invalid_argument("Zoom level " + std::to_string(zoom) +
+                                    " too high");
+    }
+    else if (lat < -85.05112878f || lat > 85.05112878f)
+    {
+        throw std::invalid_argument("Latitude " + std::to_string(lat) + " invalid");
+    }
+    else if (lon < -180.0f && lon > 180.0f)
+    {
+        throw std::invalid_argument("Longitude " + std::to_string(lon) +
+                                    " invalid");
+    }
+
+    //LatLongToPixelXY
+    double latitude  = Clip(lat, MinLatitude, MaxLatitude);
+    double longitude = Clip(lon, MinLongitude, MaxLongitude);
+    ROS_ERROR_STREAM("Clipping latlon  \t"<<latitude<<"\t"<<longitude);
+    double x = (longitude + 180.0f) / 360.0f;
+    double sinLatitude = sin(latitude * M_PI / 180.0f);
+    double y = 0.5f - log((1.0f + sinLatitude) / (1.0f - sinLatitude)) / (4.0f * M_PI);
+    uint mapSize = MapSize(zoom);
+    double pixelX = (int) Clip(x * mapSize + 0.5f, 0.0f, mapSize - 1.0f);
+    double pixelY = (int) Clip(y * mapSize + 0.5f, 0.0f, mapSize - 1.0f);
+    ROS_ERROR_STREAM("LatLongToPixelXY \t"<<(int)pixelX<<"\t"<<(int)pixelY);
+
+    //PixelXYToTileXY
+    tileX = floor(pixelX / 256.0f); //tileX
+    tileY = floor(pixelY / 256.0f); //tileY
+    ROS_ERROR_STREAM("PixelXYToTileXY  \t"<<x<<"\t"<<y);
+
+    //TileXYToPixelXY
+    double pixelX2 = tileX * 256.0f;
+    double pixelY2 = tileY * 256.0f;
+    ROS_ERROR_STREAM("TileXYToPixelXY  \t"<<(int)pixelX<<"\t"<<(int)pixelY);
+
+    //Get offset and multiply by the Ground Resolution
+    double GroundResolution = cos(latitude * M_PI / 180.0f) * 2.0f * M_PI * EarthRadius / MapSize(zoom);
+    ROS_ERROR_STREAM("GroundResolution  \t"<<GroundResolution);
+
+    //handle offset from lat/lon to the corner of the quadtile
+    setOffsetx(-(pixelX-pixelX2)*GroundResolution);
+    setOffsety( (pixelY-pixelY2)*GroundResolution);
+
+    ROS_ERROR_STREAM(x<<"\t"<<(int)pixelX);
+    ROS_ERROR_STREAM(y<<"\t"<<(int)pixelY);
+
+    ROS_ERROR_STREAM("Calculated Offset\t" << (int)(pixelX-pixelX2) << "\t"<< (int)(pixelY-pixelY2) << "\t" << getOffsetx()<<"\t"<<getOffsety());
+}
+
+
 double TileLoader::zoomToResolution(double lat, unsigned int zoom) {
-  const double lat_rad = lat * M_PI / 180;
+  double lat_rad = lat * M_PI / 180;
   return 156543.034 * std::cos(lat_rad) / (1 << zoom);
 }
 
@@ -207,7 +302,17 @@ void TileLoader::finishedRequest(QNetworkReply *reply) {
   }
 }
 
-QUrl TileLoader::uriForTile(int x, int y) const {
+double TileLoader::Clip(double n, double minValue, double maxValue)
+{
+    return std::min(std::max(n,minValue),maxValue);
+}
+
+unsigned int TileLoader::MapSize(int levelOfDetail)
+{
+    return (unsigned int) 256 << levelOfDetail; // C# to C++ Bing
+}
+
+QUrl TileLoader::uriForTile_OSM(int x, int y) const {
   std::string object = object_uri_;
   //  place {x},{y},{z} with appropriate values
   replaceRegex(boost::regex("\\{x\\}", boost::regex::icase), object,
@@ -217,6 +322,15 @@ QUrl TileLoader::uriForTile(int x, int y) const {
   replaceRegex(boost::regex("\\{z\\}", boost::regex::icase), object,
                std::to_string(zoom_));
 
+  const QString qstr = QString::fromStdString(object);
+  return QUrl(qstr);
+}
+
+QUrl TileLoader::uriForTile_BING(std::string quadkey) const {
+  std::string object = object_uri_;
+  //  place {x},{y},{z} with appropriate values
+  replaceRegex(boost::regex("\\{quad\\}", boost::regex::icase), object,
+               quadkey);
   const QString qstr = QString::fromStdString(object);
   return QUrl(qstr);
 }
@@ -232,3 +346,56 @@ void TileLoader::abort() {
     qnam_ = 0;
   }
 }
+
+string TileLoader::tileToQuad(string x, string y, int startPoint)
+{
+    string bin="";
+    string quad="";
+    int oct = 0;
+
+    ROS_INFO_STREAM(x);
+    ROS_INFO_STREAM(y);
+    ROS_INFO_STREAM(startPoint);
+
+    for(int i=startPoint; i<32; i++)
+    {
+        bin = bin + y[i];
+        bin = bin + x[i];
+    }
+    for (int i=bin.length()-1; i>=0; i-=2)
+    {
+        oct = STI(bin[i]) + STI(bin[i-1]) * 2;
+        quad = quad + std::to_string(oct);
+    }
+    return reverseString(quad);
+}
+
+string TileLoader::reverseString(string s)
+{
+    string rev;
+    for(uint i=0;i<s.length();i++) {
+        rev = rev + s[s.length()-i-1];
+    }
+    return rev;
+}
+double TileLoader::getOffsety()
+{
+    return offsety;
+}
+
+void TileLoader::setOffsety(double value)
+{
+    offsety = value;
+}
+
+double TileLoader::getOffsetx()
+{
+    return offsetx;
+}
+
+void TileLoader::setOffsetx(double value)
+{
+    offsetx = value;
+}
+
+
